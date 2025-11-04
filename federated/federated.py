@@ -136,7 +136,7 @@ class FederatedTrainer:
         self.aggregator = FedAvgAggregator()
         random.seed(config.seed)
 
-    def train(self) -> List[RoundMetrics]:
+    def train(self, on_round_end: Callable[[RoundMetrics], None] | None = None) -> List[RoundMetrics]:
         metrics: List[RoundMetrics] = []
         num_clients = len(self.clients)
         for round_idx in range(1, self.config.rounds + 1):
@@ -155,14 +155,15 @@ class FederatedTrainer:
 
             train_loss = accumulated_loss / max(len(selected_clients), 1)
             test_loss, test_accuracy = self.evaluate()
-            metrics.append(
-                RoundMetrics(
-                    round=round_idx,
-                    train_loss=train_loss,
-                    test_loss=test_loss,
-                    test_accuracy=test_accuracy,
-                )
+            round_metrics = RoundMetrics(
+                round=round_idx,
+                train_loss=train_loss,
+                test_loss=test_loss,
+                test_accuracy=test_accuracy,
             )
+            metrics.append(round_metrics)
+            if on_round_end is not None:
+                on_round_end(round_metrics)
         return metrics
 
     def _sample_clients(self, num_clients: int) -> Sequence[FederatedClient]:

@@ -12,12 +12,21 @@ import numpy as np
 import torch
 
 from federated.data import create_federated_loaders, load_cifar10
-from federated.federated import ClientConfig, FederatedClient, FederatedTrainer, TrainerConfig
+from federated.federated import (
+    ClientConfig,
+    FederatedClient,
+    FederatedTrainer,
+    RoundMetrics,
+    TrainerConfig,
+)
 from federated.models import ModelConfig, create_model
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Federated learning on CIFAR-10 (FedAvg).")
+def _build_parser(parents: list[argparse.ArgumentParser] | None = None) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Federated learning on CIFAR-10 (FedAvg).",
+        parents=parents or [],
+    )
     parser.add_argument("--data-dir", type=str, default=str(Path.home() / ".cifar10"), help="Path to store CIFAR-10.")
     parser.add_argument("--num-clients", type=int, default=10, help="Total simulated clients.")
     parser.add_argument("--client-fraction", type=float, default=1.0, help="Fraction of clients sampled each round.")
@@ -33,7 +42,40 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-workers", type=int, default=2, help="Number of DataLoader workers.")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device to train on.")
     parser.add_argument("--save-metrics", type=str, default="", help="Optional path to save metrics as JSON.")
-    return parser.parse_args()
+    return parser
+
+
+def parse_args() -> argparse.Namespace:
+    config_parser = argparse.ArgumentParser(add_help=False)
+    config_parser.add_argument("--config", type=str, default="", help="Path to JSON config file overriding defaults.")
+
+    parser = _build_parser(parents=[config_parser])
+
+    config_args, remaining = config_parser.parse_known_args()
+    config_values: dict[str, object] = {}
+    if config_args.config:
+        config_path = Path(config_args.config).expanduser()
+        try:
+            with config_path.open("r", encoding="utf-8") as fp:
+                loaded = json.load(fp)
+        except FileNotFoundError as exc:
+            parser.error(f"Config file not found: {config_path}")  # exits
+        except json.JSONDecodeError as exc:
+            parser.error(f"Failed to parse JSON config {config_path}: {exc.msg}")  # exits
+        if not isinstance(loaded, dict):
+            parser.error("Config file must contain a JSON object with option names as keys.")
+        config_values = loaded
+
+    if config_values:
+        valid_dests = {action.dest for action in parser._actions if action.dest != argparse.SUPPRESS}
+        unknown_keys = sorted({key for key in config_values if key not in valid_dests})
+        if unknown_keys:
+            parser.error(f"Unknown config options: {', '.join(unknown_keys)}")
+        parser.set_defaults(**config_values)
+
+    args = parser.parse_args(remaining)
+    args.config = config_args.config
+    return args
 
 
 def set_seed(seed: int) -> None:
@@ -48,6 +90,8 @@ def set_seed(seed: int) -> None:
 
 def main() -> None:
     args = parse_args()
+    if args.config:
+        print(f"Loaded configuration from {args.config}")
     set_seed(args.seed)
 
     requested_device = args.device
@@ -110,14 +154,17 @@ def main() -> None:
     )
 
     print("Starting federated training...")
-    metrics = trainer.train()
-    for round_metrics in metrics:
+
+    def log_round_progress(round_metrics: RoundMetrics) -> None:
         print(
             f"[Round {round_metrics.round:03d}] "
             f"train_loss={round_metrics.train_loss:.4f} "
             f"test_loss={round_metrics.test_loss:.4f} "
-            f"test_acc={round_metrics.test_accuracy:.4f}"
+            f"test_acc={round_metrics.test_accuracy:.4f}",
+            flush=True,
         )
+
+    metrics = trainer.train(on_round_end=log_round_progress)
 
     if args.save_metrics:
         save_path = Path(args.save_metrics)
