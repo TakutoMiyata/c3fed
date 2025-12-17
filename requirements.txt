@@ -2,3 +2,4 @@ torch>=2.0
 torchvision>=0.15
 numpy>=1.21
 pytest>=7.0
+tenseal>=0.3.14

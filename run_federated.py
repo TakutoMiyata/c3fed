@@ -42,6 +42,8 @@ def _build_parser(parents: list[argparse.ArgumentParser] | None = None) -> argpa
     parser.add_argument("--num-workers", type=int, default=2, help="Number of DataLoader workers.")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device to train on.")
     parser.add_argument("--save-metrics", type=str, default="", help="Optional path to save metrics as JSON.")
+    parser.add_argument("--use-ckks", action="store_true", help="Use CKKS homomorphic encryption for secure aggregation.")
+    parser.add_argument("--suppress-ckks-warnings", action="store_true", help="Suppress CKKS ciphertext size warnings.")
     return parser
 
 
@@ -144,6 +146,14 @@ def main() -> None:
         seed=args.seed,
     )
 
+    if args.use_ckks:
+        from federated.ckks_aggregator import CKKSAggregator
+
+        print("Using CKKS secure aggregation...")
+        aggregator = CKKSAggregator(suppress_warnings=args.suppress_ckks_warnings)
+    else:
+        aggregator = None
+
     trainer = FederatedTrainer(
         model=global_model,
         model_factory=model_factory,
@@ -151,6 +161,7 @@ def main() -> None:
         test_loader=loaders.test_loader,
         device=device,
         config=trainer_config,
+        aggregator=aggregator,
     )
 
     print("Starting federated training...")
