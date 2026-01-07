@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import random
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, List, Sequence
+from typing import Callable, Dict, Iterable, List, Protocol, Sequence
 
 import torch
 from torch import nn
@@ -14,6 +14,13 @@ from torch.utils.data import DataLoader
 
 ClientId = int
 StateDict = Dict[str, torch.Tensor]
+
+
+class Aggregator(Protocol):
+    """Protocol for aggregator implementations."""
+
+    def aggregate(self, client_updates: Sequence[tuple[int, StateDict]]) -> StateDict:
+        ...
 
 
 @dataclass
@@ -126,6 +133,7 @@ class FederatedTrainer:
         test_loader: DataLoader,
         device: torch.device,
         config: TrainerConfig,
+        aggregator: Aggregator | None = None,
     ):
         self.global_model = model.to(device)
         self.model_factory = model_factory
@@ -133,7 +141,7 @@ class FederatedTrainer:
         self.test_loader = test_loader
         self.device = device
         self.config = config
-        self.aggregator = FedAvgAggregator()
+        self.aggregator = aggregator if aggregator is not None else FedAvgAggregator()
         random.seed(config.seed)
 
     def train(self, on_round_end: Callable[[RoundMetrics], None] | None = None) -> List[RoundMetrics]:
